@@ -73,3 +73,4 @@ scripts/                  # run_pipeline.sh、run_eval.py
 本机 Python 3.14，刻意规避 `lightgbm`/`xgboost`/`faiss`/`implicit` 等无稳定 wheel 的库：
 GBDT 用 sklearn 内建 `HistGradientBoostingClassifier`，向量检索用 Numpy 归一化暴力内积（万级规模毫秒级）。
 # tmdb_lake_house_demo01
+# reelrank_demo01
