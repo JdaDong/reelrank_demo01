@@ -1,0 +1,142 @@
+project:
+  name: reelrank
+  root: .
+  data_dir: data
+  artifacts_dir: artifacts
+  log_level: INFO
+
+# ---------------- TMDB 采集 ----------------
+tmdb:
+  api_base: https://api.themoviedb.org/3
+  image_base: https://image.tmdb.org/t/p
+  language: zh-CN
+  include_adult: false
+  timeout_sec: 20
+  request_interval_ms: 220      # TMDB 限速保护（约 50 req/s 上限，此处保守）
+  max_retry: 3
+  cache_enabled: true           # 原始响应缓存到 data/raw/cache，重跑不再打接口
+  fetch:
+    max_movies: 6000            # 目标影片规模（受 API 配额影响，可下调）
+    popular_pages: 15           # /movie/popular 每页 20 部
+    top_rated_pages: 10
+    discover_year_start: 1995
+    discover_year_end: 2026
+    discover_pages_per_year: 3  # /discover/movie 按年份分页补充长尾
+    search_queries:             # 关键词补充（覆盖类型/主题词）
+      - 科幻
+      - 动作
+      - 爱情
+      - 动画
+      - 悬疑
+      - 恐怖
+      - 喜剧
+      - 纪录片
+      - 漫威
+      - 星球大战
+    search_pages_per_query: 3
+    detail_batch_size: 40       # credits / keywords / similar / recommendations 并发
+    detail_concurrency: 4
+    similar_graph_limit: 20     # 每部影片保留的相似/推荐边数量
+
+# ---------------- 用户行为 ----------------
+behavior:
+  # auto = 先尝试 MovieLens 真实评分（links.csv 含 tmdbId），失败回退合成日志
+  source: auto
+  movielens_url: https://files.grouplens.org/datasets/movielens/ml-latest-small.zip
+  movielens_min_rating: 3.5     # 视为正样本的评分阈值
+  synthetic:
+    users: 3000
+    events_per_user_min: 20
+    events_per_user_max: 80
+    seed: 42
+
+# ---------------- 数仓 ----------------
+warehouse:
+  duckdb_path: data/warehouse/reelrank.duckdb
+  parquet_dir: data/warehouse/parquet
+
+# ---------------- 特征 ----------------
+features:
+  bayesian_prior_votes: 200     # 贝叶斯质量分先验票数
+  bayesian_prior_mean: 6.5
+  freshness_half_life_days: 2555 # 新鲜度半衰期（约 7 年，避免长尾影片全部衰减到 0）
+  popularity_log_base: 10.0
+  svd_dim: 64
+  tfidf_max_features: 80000
+
+# ---------------- 漏斗 ----------------
+funnel:
+  recall:
+    bm25_topk: 400
+    vector_topk: 400
+    itemcf_topk: 400
+    hot_topk: 120
+    merge_limit: 1000
+  coarse:
+    topk: 300
+    w_lr: 0.55                  # LR 预估分权重
+    w_tower: 0.25               # 双塔内积权重
+    w_quality: 0.20             # 贝叶斯质量分权重
+  fine:
+    topk: 50
+    model: gbdt
+    gbdt:
+      max_iter: 300
+      learning_rate: 0.06
+      max_depth: 6
+    w_pctr: 0.70
+    w_quality: 0.20
+    w_freshness: 0.10
+  rerank:
+    topk: 20
+    mmr_lambda: 0.72            # 越大越偏相关性，越小越偏多样性
+    window_size: 6              # 打散滑动窗口
+    max_same_genre: 2           # 窗口内同类型上限
+    max_same_director: 1        # 窗口内同导演上限
+    min_vote_average: 5.0       # 质量门槛
+    explore_ratio: 0.10         # 探索流量占比
+    explore_seed: 7
+
+# ---------------- 广告 ----------------
+ads:
+  enabled: true
+  slots: [3, 8, 14]             # 结果流中的广告位（0-based）
+  ecpm_scale: 1000.0            # eCPM = pCTR × bid × quality × scale（bid 单位为元/点击）
+  min_ecpm: 5.0                 # 低于该 eCPM 不投放
+  reserve_price: 3.0            # 底价（千次曝光元）
+  quality_factor_min: 0.80      # 质量因子下限
+  quality_factor_max: 1.25
+  gsp_enabled: true             # GSP 二价扣费
+  freq_cap_per_session: 1       # 同一广告主单会话频次上限
+  advertiser_count: 12          # 构造广告主数量
+  creatives_per_advertiser: 8   # 每个广告主的创意（影片）数
+  default_daily_budget: 2000.0
+  bid_min: 0.8
+  bid_max: 6.0
+  budget_state_path: data/warehouse/ad_budget.json
+
+# ---------------- 服务 ----------------
+serving:
+  host: 0.0.0.0
+  port: 8000
+  reload: false
+  trace_enabled: true           # 响应中返回 FunnelTrace
+  trace_items: 30               # 每层 trace 中回传的候选明细条数
+  query_cache_size: 256
+
+# ---------------- 训练采样 ----------------
+train:
+  sample_users: 400          # 推荐场景采样的用户数
+  sample_queries: 400        # 搜索场景合成的 query 数
+  candidates_per_sample: 300 # 每个样本进入粗排训练的候选量
+  fine_candidates_per_sample: 60  # 粗排后进入精排训练的候选量
+  negatives_per_positive: 3
+  random_state: 42
+  max_neighbors: 100         # ItemCF 每个 item 保留的邻居数
+
+# ---------------- 评估 ----------------
+eval:
+  test_ratio: 0.2
+  ks: [10, 20, 50]
+  negative_ratio: 4
+  seed: 42

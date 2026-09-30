@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: reelrank
+Version: 0.1.0
+Summary: 基于 TMDB 的搜索/推荐/广告四层漏斗排序系统 Demo（召回→粗排→精排→重排）
+Requires-Python: >=3.10

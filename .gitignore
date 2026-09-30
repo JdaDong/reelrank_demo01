@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+
+data/raw/
+data/warehouse/
+artifacts/
+node_modules/
+dist/
+web/dist/
+*.log
+.pytest_cache/
+
+.playwright-cli/
